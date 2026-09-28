@@ -15,7 +15,7 @@ import { toast } from 'sonner'
 import type { CreditCardBill, ProjectedTransaction, Transaction } from '@/types'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
-import { ArrowLeft, ArrowLeftRight, CalendarClock, ChevronLeft, ChevronRight, Clock, EyeClosed, HelpCircle, Paperclip, Pencil, Plus, X } from 'lucide-react'
+import { AlertCircle, ArrowLeft, ArrowLeftRight, CalendarClock, ChevronLeft, ChevronRight, Clock, EyeClosed, HelpCircle, Paperclip, Pencil, Plus, X } from 'lucide-react'
 import { MobileTransactionRow } from '@/components/mobile-transaction-row'
 import { CategoryIcon } from '@/components/category-icon'
 import { ProjectedTransactionBadge } from '@/components/projected-transaction-badge'
@@ -516,7 +516,7 @@ export default function AccountDetailPage() {
   // the real history.
   const { data: txData, isLoading: txLoading } = useQuery({
     queryKey: ['transactions', { account_id: id, bill_id: activeBill?.id, from: filterFrom, to: filterTo, all_pages: true, include_opening_balance: true, unbilled_only: isInProgressCycle }],
-    queryFn: () => transactions.listAll({
+    queryFn: ({ signal }) => transactions.listAll({
       account_id: id,
       // When the active cycle is a real bill, prefer bill_id (Pluggy's
       // truth — picks up charges the bank rolled outside the nominal date
@@ -530,7 +530,10 @@ export default function AccountDetailPage() {
       from: filterFrom || undefined,
       to: filterTo || undefined,
       include_opening_balance: true,
-    }),
+    // The walk is up to 40 pages deep; without the signal TanStack Query
+    // ignores a superseded range and its pages keep landing after the user
+    // has already moved on.
+    }, signal),
     enabled: !!id,
   })
 
@@ -1543,6 +1546,26 @@ export default function AccountDetailPage() {
       </div>
         )
       })()}
+
+      {/* The page walk is capped, so a range wider than the cap arrives
+          clipped. The chart, the running balance and the list all read these
+          same rows — a silently cut range looks exactly like a quiet month,
+          so say what is missing instead of letting the numbers imply they
+          cover the whole window. */}
+      {txData?.truncated && (
+        <div
+          role="status"
+          className="flex items-center gap-2.5 bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/30 rounded-lg px-4 py-2.5 mb-6"
+        >
+          <AlertCircle size={16} className="shrink-0 text-amber-600 dark:text-amber-400" />
+          <p className="text-sm text-amber-900 dark:text-amber-200">
+            {t('accounts.rangeTruncated', {
+              shown: txData.items.length.toLocaleString(locale),
+              total: txData.total.toLocaleString(locale),
+            })}
+          </p>
+        </div>
+      )}
 
       {/* Transaction table */}
       <div className="bg-card rounded-xl border border-border shadow-sm overflow-hidden">
