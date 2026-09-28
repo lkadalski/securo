@@ -509,9 +509,14 @@ export default function AccountDetailPage() {
     })),
   })
 
+  // The whole range, not one page: the chart, the running-balance walk and
+  // the grouped list below all read `txData`. A single `limit=500` page made
+  // every row older than the newest 500 vanish, so a range wide enough to
+  // reach back to 03/2023 drew a flat line on the opening balance instead of
+  // the real history.
   const { data: txData, isLoading: txLoading } = useQuery({
-    queryKey: ['transactions', { account_id: id, bill_id: activeBill?.id, from: filterFrom, to: filterTo, limit: 500, include_opening_balance: true, unbilled_only: isInProgressCycle }],
-    queryFn: () => transactions.list({
+    queryKey: ['transactions', { account_id: id, bill_id: activeBill?.id, from: filterFrom, to: filterTo, all_pages: true, include_opening_balance: true, unbilled_only: isInProgressCycle }],
+    queryFn: () => transactions.listAll({
       account_id: id,
       // When the active cycle is a real bill, prefer bill_id (Pluggy's
       // truth — picks up charges the bank rolled outside the nominal date
@@ -524,7 +529,6 @@ export default function AccountDetailPage() {
       unbilled_only: isInProgressCycle || undefined,
       from: filterFrom || undefined,
       to: filterTo || undefined,
-      limit: 500,
       include_opening_balance: true,
     }),
     enabled: !!id,

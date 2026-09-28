@@ -99,7 +99,9 @@ import type {
   ReconciliationHistoryEvent,
 } from '@/types'
 
-const api = axios.create({
+// Exported so tests can drive the real request path (list/pagination) with a
+// fixture adapter instead of mocking the endpoints away from under it.
+export const api = axios.create({
   baseURL: '/api',
 })
 
@@ -494,39 +496,90 @@ export const accounts = {
 }
 
 // Transactions
+export type TransactionListParams = {
+  account_id?: string
+  account_ids?: string[]
+  category_id?: string
+  category_ids?: string[]
+  payee_id?: string
+  uncategorized?: boolean
+  type?: string
+  status?: string
+  from?: string
+  to?: string
+  bill_id?: string
+  group_id?: string
+  unbilled_only?: boolean
+  q?: string
+  page?: number
+  limit?: number
+  include_opening_balance?: boolean
+  exclude_transfers?: boolean
+  user_pnl_only?: boolean
+  exclude_ignored?: boolean
+  tags?: string[]
+  min_amount?: number
+  max_amount?: number
+  sort_by?: string
+  sort_dir?: 'asc' | 'desc'
+}
+
+/** Page size used when walking a result set to its end (see `listAll`). */
+const LIST_ALL_PAGE_SIZE = 500
+/** Hard ceiling on rows a single `listAll` walk will pull, so a runaway
+ *  filter (e.g. "everything, ever" on a huge workspace) cannot pin the tab.
+ *  40 pages × 500 rows. */
+const LIST_ALL_MAX_ROWS = 20000
+
 export const transactions = {
-  list: async (params?: {
-    account_id?: string
-    account_ids?: string[]
-    category_id?: string
-    category_ids?: string[]
-    payee_id?: string
-    uncategorized?: boolean
-    type?: string
-    status?: string
-    from?: string
-    to?: string
-    bill_id?: string
-    group_id?: string
-    unbilled_only?: boolean
-    q?: string
-    page?: number
-    limit?: number
-    include_opening_balance?: boolean
-    exclude_transfers?: boolean
-    user_pnl_only?: boolean
-    exclude_ignored?: boolean
-    tags?: string[]
-    min_amount?: number
-    max_amount?: number
-    sort_by?: string
-    sort_dir?: 'asc' | 'desc'
-  }): Promise<PaginatedTransactions> => {
+  list: async (params?: TransactionListParams): Promise<PaginatedTransactions> => {
     const { data } = await api.get('/transactions', {
       params,
       paramsSerializer: { indexes: null },
     })
     return data
+  },
+
+  /**
+   * Every row the filter matches — pages through until the result set ends.
+   *
+   * `list` returns one page (default 50), and the account page used to ask
+   * for exactly one big page of 500: on an account with thousands of rows the
+   * oldest ones silently fell off the list, the running-balance walk, and the
+   * balance chart, which then drew a flat line over the truncated window's
+   * opening balance instead of the real history. Anything that renders a whole
+   * range (chart, running balance, full statement list) must use this.
+   *
+   * `page`/`limit` are owned here; callers pass only their filters.
+   */
+  listAll: async (params?: Omit<TransactionListParams, 'page' | 'limit'>): Promise<PaginatedTransactions> => {
+    const items: Transaction[] = []
+    let total = 0
+    let response: PaginatedTransactions | null = null
+
+    for (let page = 1; ; page++) {
+      const res = await transactions.list({ ...params, page, limit: LIST_ALL_PAGE_SIZE })
+      response = res
+      const rows = res.items ?? []
+      total = res.total ?? rows.length
+      items.push(...rows)
+      // A short page is the definitive end. A full page is not: `total` can
+      // disagree with what the offsets deliver (rows written mid-walk), so we
+      // stop on the page shape and dedupe below instead of trusting the count.
+      if (rows.length < LIST_ALL_PAGE_SIZE) break
+      if (items.length >= LIST_ALL_MAX_ROWS) break
+    }
+
+    // Offset pagination repeats a row when something is inserted between two
+    // page requests; the same id twice would double-count in the balance walk.
+    const seen = new Set<string>()
+    const deduped = items.filter((tx) => {
+      if (seen.has(tx.id)) return false
+      seen.add(tx.id)
+      return true
+    })
+
+    return { ...(response as PaginatedTransactions), items: deduped, total }
   },
   calendar: async (params?: {
     month?: string

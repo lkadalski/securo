@@ -31,7 +31,14 @@ const api = vi.hoisted(() => ({
 
 vi.mock('@/lib/api', () => ({
   accounts: api.accounts,
-  transactions: api.transactions,
+  transactions: {
+    ...api.transactions,
+    // The page asks for every row in the window (api.transactions.listAll);
+    // here a single page is always the whole answer, because the fixture
+    // returns an empty page and the walk stops.
+    listAll: (params: Record<string, unknown>) =>
+      api.transactions.list({ ...params, page: 1, limit: 500 }),
+  },
   dashboard: api.dashboard,
   categories: api.categories,
   categoryGroups: api.categoryGroups,
