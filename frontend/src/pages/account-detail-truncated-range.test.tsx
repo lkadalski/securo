@@ -283,6 +283,7 @@ describe('listAll truncation', () => {
 
     // 600 rows: the walk finishes on a short page and the page is quiet.
     await waitFor(() => expect(pagesRequested.length).toBeGreaterThanOrEqual(2))
+    await screen.findAllByText('Row 599')
     expect(screen.queryByRole('status')).not.toBeInTheDocument()
   }, 30000)
 })
